@@ -7,7 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jstockdi/.cargo/bin/schd</string>
+        <string>$HOME/.cargo/bin/schd</string>
         <string>daemon</string>
     </array>
 
