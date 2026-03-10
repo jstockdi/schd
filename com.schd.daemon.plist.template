@@ -18,9 +18,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/schd-daemon.out.log</string>
+    <string>$HOME/Library/Logs/schd/daemon.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/schd-daemon.err.log</string>
+    <string>$HOME/Library/Logs/schd/daemon.err.log</string>
 </dict>
 </plist>
