@@ -17,7 +17,7 @@ impl fmt::Display for Error {
         match self {
             Error::Db(e) => write!(f, "{e}"),
             Error::Validation(msg) => write!(f, "{msg}"),
-            Error::NotFound(name) => write!(f, "schedule '{name}' not found"),
+            Error::NotFound(name) => write!(f, "{name} not found"),
         }
     }
 }
@@ -50,7 +50,7 @@ pub fn cmd_remove(conn: &Connection, name: &str) -> Result<String> {
     if schedule::remove(conn, name)? {
         Ok(format!("removed schedule '{name}'"))
     } else {
-        Err(Error::NotFound(name.to_string()))
+        Err(Error::NotFound(format!("schedule '{name}'")))
     }
 }
 
@@ -82,7 +82,17 @@ pub fn cmd_set_enabled(conn: &Connection, name: &str, enabled: bool) -> Result<S
     if schedule::set_enabled(conn, name, enabled)? {
         Ok(format!("{action} schedule '{name}'"))
     } else {
-        Err(Error::NotFound(name.to_string()))
+        Err(Error::NotFound(format!("schedule '{name}'")))
+    }
+}
+
+pub fn cmd_trigger(conn: &Connection, name: &str) -> Result<String> {
+    let sched = schedule::get_by_name(conn, name)?
+        .ok_or_else(|| Error::NotFound(name.to_string()))?;
+    let now = chrono::Utc::now();
+    match run::insert_pending(conn, sched.id, now)? {
+        Some(run_id) => Ok(format!("triggered run {run_id} for '{name}'")),
+        None => Ok(format!("run already pending for '{name}'")),
     }
 }
 
@@ -110,6 +120,13 @@ pub fn cmd_runs(conn: &Connection, name: Option<&str>, limit: usize) -> Result<S
         ));
     }
     Ok(out)
+}
+
+pub fn cmd_output(conn: &Connection, run_id: i64) -> Result<String> {
+    match run::get_output(conn, run_id)? {
+        Some(output) => Ok(output),
+        None => Err(Error::NotFound(format!("run {run_id}"))),
+    }
 }
 
 /// Run one scheduler tick against a db path. Opens its own connection.
@@ -166,7 +183,15 @@ pub fn cmd_worker(db_path: &Path, interval: u64) -> ! {
     }
 }
 
+fn ensure_log_dir() {
+    if let Some(home) = std::env::var_os("HOME") {
+        let log_dir = PathBuf::from(home).join("Library/Logs/schd");
+        let _ = std::fs::create_dir_all(log_dir);
+    }
+}
+
 pub fn cmd_daemon(db_path: &Path, scheduler_interval: u64, worker_interval: u64) -> ! {
+    ensure_log_dir();
     eprintln!(
         "[daemon] starting (scheduler={scheduler_interval}s, worker={worker_interval}s)"
     );
@@ -350,7 +375,7 @@ mod tests {
         let e = Error::Validation("bad input".to_string());
         assert_eq!(format!("{e}"), "bad input");
 
-        let e = Error::NotFound("foo".to_string());
+        let e = Error::NotFound("schedule 'foo'".to_string());
         assert_eq!(format!("{e}"), "schedule 'foo' not found");
 
         let e = Error::Db(rusqlite::Error::QueryReturnedNoRows);

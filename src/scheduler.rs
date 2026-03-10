@@ -14,10 +14,12 @@ pub fn tick(conn: &Connection) -> rusqlite::Result<usize> {
 
     for sched in &schedules {
         if let Some(fire_time) = schedule::most_recent_fire_time(&sched.cron, now) {
-            if run::insert_pending(conn, sched.id, fire_time)? {
+            if let Some(run_id) = run::insert_pending(conn, sched.id, fire_time)? {
                 eprintln!(
-                    "[scheduler] scheduled run for '{}' at {}",
+                    "[scheduler] scheduled run {} for '{}' (schedule {}) at {}",
+                    run_id,
                     sched.name,
+                    sched.id,
                     fire_time.format("%Y-%m-%dT%H:%M:%S")
                 );
                 count += 1;

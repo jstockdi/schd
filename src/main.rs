@@ -37,6 +37,10 @@ enum Commands {
     Enable { name: String },
     /// Disable a schedule
     Disable { name: String },
+    /// Show output of a run
+    Output { run_id: i64 },
+    /// Trigger an immediate run for a schedule
+    Trigger { name: String },
     /// Show recent runs
     Runs {
         /// Filter by schedule name
@@ -89,10 +93,11 @@ fn main() {
                 }
                 Commands::Remove { name } => cli::cmd_remove(&conn, &name),
                 Commands::List => cli::cmd_list(&conn),
+                Commands::Output { run_id } => cli::cmd_output(&conn, run_id),
                 Commands::Enable { name } => cli::cmd_set_enabled(&conn, &name, true),
                 Commands::Disable { name } => cli::cmd_set_enabled(&conn, &name, false),
+                Commands::Trigger { name } => cli::cmd_trigger(&conn, &name),
                 Commands::Runs { name, limit } => cli::cmd_runs(&conn, name.as_deref(), limit),
-                // Already handled above
                 Commands::Scheduler { .. }
                 | Commands::Worker { .. }
                 | Commands::Daemon { .. } => unreachable!(),

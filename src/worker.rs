@@ -12,14 +12,14 @@ pub fn tick(conn: &Connection) -> rusqlite::Result<bool> {
         None => return Ok(false),
     };
 
-    let command = run::get_command_for_run(conn, &run)?;
+    let (name, command) = run::get_schedule_for_run(conn, &run)?;
     let (exit_code, output) = execute_command(&command);
 
     run::complete(conn, run.id, exit_code, &output)?;
 
     eprintln!(
-        "[worker] completed run {} for schedule {}: exit={}",
-        run.id, run.schedule_id, exit_code
+        "[worker] completed run {} for '{}' (schedule {}): exit={}",
+        run.id, name, run.schedule_id, exit_code
     );
 
     Ok(true)

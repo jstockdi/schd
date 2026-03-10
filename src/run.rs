@@ -14,18 +14,22 @@ pub struct Run {
 }
 
 /// Insert a pending run if one doesn't already exist for this schedule+time.
-/// Returns true if a new run was inserted.
+/// Returns the new run ID if inserted, or None if it already existed.
 pub fn insert_pending(
     conn: &Connection,
     schedule_id: i64,
     scheduled_for: DateTime<Utc>,
-) -> Result<bool> {
+) -> Result<Option<i64>> {
     let time_str = scheduled_for.format("%Y-%m-%dT%H:%M:%S").to_string();
     let rows = conn.execute(
         "INSERT OR IGNORE INTO runs (schedule_id, scheduled_for, status) VALUES (?1, ?2, 'pending')",
         params![schedule_id, time_str],
     )?;
-    Ok(rows > 0)
+    if rows > 0 {
+        Ok(Some(conn.last_insert_rowid()))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Claim a pending run for execution. Sets status to 'running' and records start time.
@@ -137,12 +141,25 @@ fn row_to_run_inline(row: &rusqlite::Row) -> rusqlite::Result<Run> {
     row_to_run(row)
 }
 
-/// Get the command for a run by joining with schedules.
-pub fn get_command_for_run(conn: &Connection, run: &Run) -> Result<String> {
+/// Get the output for a run by ID.
+pub fn get_output(conn: &Connection, run_id: i64) -> Result<Option<String>> {
+    match conn.query_row(
+        "SELECT output FROM runs WHERE id = ?1",
+        params![run_id],
+        |row| row.get::<_, Option<String>>(0),
+    ) {
+        Ok(output) => Ok(output),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Get the name and command for a run by joining with schedules.
+pub fn get_schedule_for_run(conn: &Connection, run: &Run) -> Result<(String, String)> {
     conn.query_row(
-        "SELECT command FROM schedules WHERE id = ?1",
+        "SELECT name, command FROM schedules WHERE id = ?1",
         params![run.schedule_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )
 }
 
@@ -167,9 +184,9 @@ mod tests {
         let sched_id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
         let time = Utc::now();
 
-        assert!(insert_pending(&conn, sched_id, time).unwrap());
+        assert!(insert_pending(&conn, sched_id, time).unwrap().is_some());
         // Duplicate insert should be ignored
-        assert!(!insert_pending(&conn, sched_id, time).unwrap());
+        assert!(insert_pending(&conn, sched_id, time).unwrap().is_none());
     }
 
     #[test]
@@ -238,13 +255,14 @@ mod tests {
     }
 
     #[test]
-    fn test_get_command_for_run() {
+    fn test_get_schedule_for_run() {
         let conn = setup();
         let sched_id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
         insert_pending(&conn, sched_id, Utc::now()).unwrap();
         let run = claim_pending(&conn).unwrap().unwrap();
 
-        let cmd = get_command_for_run(&conn, &run).unwrap();
+        let (name, cmd) = get_schedule_for_run(&conn, &run).unwrap();
+        assert_eq!(name, "job");
         assert_eq!(cmd, "echo hi");
     }
 
