@@ -154,6 +154,18 @@ pub fn get_output(conn: &Connection, run_id: i64) -> Result<Option<String>> {
     }
 }
 
+/// Reset any runs stuck in 'running' state back to 'pending'.
+/// Called on worker startup to re-queue runs that never finished
+/// (e.g. from a previous crash or restart).
+/// Returns the number of runs reset.
+pub fn reset_running(conn: &Connection) -> Result<usize> {
+    let count = conn.execute(
+        "UPDATE runs SET status = 'pending', started_at = NULL WHERE status = 'running'",
+        [],
+    )?;
+    Ok(count)
+}
+
 /// Get the name and command for a run by joining with schedules.
 pub fn get_schedule_for_run(conn: &Connection, run: &Run) -> Result<(String, String)> {
     conn.query_row(

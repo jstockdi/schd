@@ -509,6 +509,7 @@ dependencies = [
  "chrono",
  "clap",
  "cron",
+ "libc",
  "rusqlite",
  "tempfile",
 ]

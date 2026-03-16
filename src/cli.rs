@@ -146,7 +146,7 @@ pub fn scheduler_tick(db_path: &Path) -> Option<String> {
 
 /// Run one worker tick against a db path. Opens its own connection.
 /// Returns true if a job was executed (caller should immediately try again).
-pub fn worker_tick(db_path: &Path) -> bool {
+pub fn worker_tick(db_path: &Path, timeout: Duration) -> bool {
     let conn = match db::open(db_path) {
         Ok(c) => c,
         Err(_) => return false,
@@ -154,7 +154,7 @@ pub fn worker_tick(db_path: &Path) -> bool {
     if db::migrate(&conn).is_err() {
         return false;
     }
-    match worker::tick(&conn) {
+    match worker::tick(&conn, timeout) {
         Ok(ran) => ran,
         Err(e) => {
             eprintln!("[worker] error: {e}");
@@ -173,10 +173,12 @@ pub fn cmd_scheduler(db_path: &Path, interval: u64) -> ! {
     }
 }
 
-pub fn cmd_worker(db_path: &Path, interval: u64) -> ! {
-    eprintln!("[worker] starting (interval={interval}s)");
+pub fn cmd_worker(db_path: &Path, interval: u64, timeout: u64) -> ! {
+    let timeout_dur = Duration::from_secs(timeout);
+    eprintln!("[worker] starting (interval={interval}s, timeout={timeout}s)");
+    reset_stale_runs(db_path);
     loop {
-        if worker_tick(db_path) {
+        if worker_tick(db_path, timeout_dur) {
             continue;
         }
         thread::sleep(Duration::from_secs(interval));
@@ -190,11 +192,24 @@ fn ensure_log_dir() {
     }
 }
 
-pub fn cmd_daemon(db_path: &Path, scheduler_interval: u64, worker_interval: u64) -> ! {
+fn reset_stale_runs(db_path: &Path) {
+    if let Ok(conn) = db::open(db_path) {
+        if db::migrate(&conn).is_ok() {
+            match run::reset_running(&conn) {
+                Ok(n) if n > 0 => eprintln!("[worker] reset {n} stale running run(s)"),
+                _ => {}
+            }
+        }
+    }
+}
+
+pub fn cmd_daemon(db_path: &Path, scheduler_interval: u64, worker_interval: u64, timeout: u64) -> ! {
     ensure_log_dir();
+    let timeout_dur = Duration::from_secs(timeout);
     eprintln!(
-        "[daemon] starting (scheduler={scheduler_interval}s, worker={worker_interval}s)"
+        "[daemon] starting (scheduler={scheduler_interval}s, worker={worker_interval}s, timeout={timeout}s)"
     );
+    reset_stale_runs(db_path);
 
     let db_path_sched = db_path.to_path_buf();
     let _sched_handle = thread::spawn(move || loop {
@@ -206,7 +221,7 @@ pub fn cmd_daemon(db_path: &Path, scheduler_interval: u64, worker_interval: u64)
 
     let db_path_work = db_path.to_path_buf();
     loop {
-        if worker_tick(&db_path_work) {
+        if worker_tick(&db_path_work, timeout_dur) {
             continue;
         }
         thread::sleep(Duration::from_secs(worker_interval));
@@ -341,7 +356,7 @@ mod tests {
         let (_dir, conn) = setup();
         cmd_add(&conn, "job", "0 * * * * * *", "echo hi").unwrap();
         scheduler::tick(&conn).unwrap();
-        worker::tick(&conn).unwrap();
+        worker::tick(&conn, Duration::from_secs(10)).unwrap();
 
         let result = cmd_runs(&conn, Some("job"), 10).unwrap();
         assert!(result.contains("job"));
@@ -363,7 +378,7 @@ mod tests {
         let (_dir, conn) = setup();
         cmd_add(&conn, "job", "0 * * * * * *", "exit 1").unwrap();
         scheduler::tick(&conn).unwrap();
-        worker::tick(&conn).unwrap();
+        worker::tick(&conn, Duration::from_secs(10)).unwrap();
 
         let result = cmd_runs(&conn, None, 10).unwrap();
         assert!(result.contains("failed"));
@@ -431,7 +446,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
         init_db(&db_path).unwrap();
 
-        assert!(!worker_tick(&db_path));
+        assert!(!worker_tick(&db_path, Duration::from_secs(10)));
     }
 
     #[test]
@@ -443,12 +458,13 @@ mod tests {
         drop(conn);
 
         scheduler_tick(&db_path);
-        assert!(worker_tick(&db_path));
-        assert!(!worker_tick(&db_path)); // no more work
+        let timeout = Duration::from_secs(10);
+        assert!(worker_tick(&db_path, timeout));
+        assert!(!worker_tick(&db_path, timeout)); // no more work
     }
 
     #[test]
     fn test_worker_tick_bad_path() {
-        assert!(!worker_tick(Path::new("/nonexistent/dir/db.sqlite")));
+        assert!(!worker_tick(Path::new("/nonexistent/dir/db.sqlite"), Duration::from_secs(10)));
     }
 }

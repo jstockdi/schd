@@ -57,6 +57,9 @@ enum Commands {
     Worker {
         #[arg(short, long, default_value = "5")]
         interval: u64,
+        /// Kill commands that run longer than this (seconds)
+        #[arg(short, long, default_value = "3600")]
+        timeout: u64,
     },
     /// Run both scheduler and worker in one process
     Daemon {
@@ -64,6 +67,9 @@ enum Commands {
         scheduler_interval: u64,
         #[arg(long, default_value = "5")]
         worker_interval: u64,
+        /// Kill commands that run longer than this (seconds)
+        #[arg(short, long, default_value = "3600")]
+        timeout: u64,
     },
 }
 
@@ -74,11 +80,12 @@ fn main() {
     // Long-running commands handle their own DB connections
     match args.command {
         Commands::Scheduler { interval } => cli::cmd_scheduler(&db_path, interval),
-        Commands::Worker { interval } => cli::cmd_worker(&db_path, interval),
+        Commands::Worker { interval, timeout } => cli::cmd_worker(&db_path, interval, timeout),
         Commands::Daemon {
             scheduler_interval,
             worker_interval,
-        } => cli::cmd_daemon(&db_path, scheduler_interval, worker_interval),
+            timeout,
+        } => cli::cmd_daemon(&db_path, scheduler_interval, worker_interval, timeout),
         cmd => {
             let conn = match cli::init_db(&db_path) {
                 Ok(c) => c,
