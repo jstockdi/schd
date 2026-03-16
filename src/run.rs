@@ -292,6 +292,43 @@ mod tests {
     }
 
     #[test]
+    fn test_reset_running() {
+        let conn = setup();
+        let sched_id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
+        insert_pending(&conn, sched_id, Utc::now()).unwrap();
+
+        // Claim it so it's 'running'
+        let run = claim_pending(&conn).unwrap().unwrap();
+        assert_eq!(run.status, "running");
+
+        // Reset should move it back to pending
+        let count = reset_running(&conn).unwrap();
+        assert_eq!(count, 1);
+
+        // Should be claimable again
+        let run2 = claim_pending(&conn).unwrap().unwrap();
+        assert_eq!(run2.id, run.id);
+        assert_eq!(run2.status, "running");
+    }
+
+    #[test]
+    fn test_reset_running_ignores_other_statuses() {
+        let conn = setup();
+        let sched_id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
+        insert_pending(&conn, sched_id, Utc::now()).unwrap();
+
+        // Pending run should not be affected
+        let count = reset_running(&conn).unwrap();
+        assert_eq!(count, 0);
+
+        // Complete a run — should not be affected either
+        let run = claim_pending(&conn).unwrap().unwrap();
+        complete(&conn, run.id, 0, "ok").unwrap();
+        let count = reset_running(&conn).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
     fn test_cascade_delete() {
         let conn = setup();
         let sched_id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();

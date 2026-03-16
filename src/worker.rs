@@ -180,6 +180,20 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_command_timeout() {
+        let (code, output) = execute_command("sleep 60", Duration::from_secs(2));
+        assert_eq!(code, -1);
+        assert!(output.contains("killed: command timed out after 2s"));
+    }
+
+    #[test]
+    fn test_execute_command_timeout_kills_children() {
+        let (code, output) = execute_command("sleep 60 & sleep 60 & wait", Duration::from_secs(2));
+        assert_eq!(code, -1);
+        assert!(output.contains("timed out"));
+    }
+
+    #[test]
     fn test_drains_all_pending() {
         let conn = setup();
         let id = schedule::add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
