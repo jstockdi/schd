@@ -29,6 +29,16 @@ enum Commands {
         /// Command to execute
         command: String,
     },
+    /// Edit an existing schedule's cron and/or command
+    Edit {
+        name: String,
+        /// New cron expression (7-field: sec min hour dom month dow year)
+        #[arg(long)]
+        cron: Option<String>,
+        /// New command to execute
+        #[arg(long)]
+        command: Option<String>,
+    },
     /// Remove a schedule
     Remove { name: String },
     /// List all schedules
@@ -97,6 +107,9 @@ fn main() {
             let result = match cmd {
                 Commands::Add { name, cron, command } => {
                     cli::cmd_add(&conn, &name, &cron, &command)
+                }
+                Commands::Edit { name, cron, command } => {
+                    cli::cmd_edit(&conn, &name, cron.as_deref(), command.as_deref())
                 }
                 Commands::Remove { name } => cli::cmd_remove(&conn, &name),
                 Commands::List => cli::cmd_list(&conn),

@@ -32,6 +32,33 @@ pub fn remove(conn: &Connection, name: &str) -> Result<bool> {
     Ok(rows > 0)
 }
 
+/// Update a schedule's cron and/or command in place, preserving its id and run
+/// history. Pass `None` for a field to leave it unchanged. Returns true if a
+/// matching schedule was found and at least one field was updated.
+pub fn update(
+    conn: &Connection,
+    name: &str,
+    cron: Option<&str>,
+    command: Option<&str>,
+) -> Result<bool> {
+    let rows = match (cron, command) {
+        (Some(c), Some(cmd)) => conn.execute(
+            "UPDATE schedules SET cron = ?1, command = ?2 WHERE name = ?3",
+            params![c, cmd, name],
+        )?,
+        (Some(c), None) => conn.execute(
+            "UPDATE schedules SET cron = ?1 WHERE name = ?2",
+            params![c, name],
+        )?,
+        (None, Some(cmd)) => conn.execute(
+            "UPDATE schedules SET command = ?1 WHERE name = ?2",
+            params![cmd, name],
+        )?,
+        (None, None) => 0,
+    };
+    Ok(rows > 0)
+}
+
 pub fn set_enabled(conn: &Connection, name: &str, enabled: bool) -> Result<bool> {
     let rows = conn.execute(
         "UPDATE schedules SET enabled = ?1 WHERE name = ?2",
@@ -185,6 +212,53 @@ mod tests {
 
         // Non-existent schedule
         assert!(!set_enabled(&conn, "no-such", false).unwrap());
+    }
+
+    #[test]
+    fn test_update_cron_and_command() {
+        let conn = setup();
+        add(&conn, "test-job", "0 0 9 * * * *", "echo hello").unwrap();
+
+        assert!(update(&conn, "test-job", Some("0 0 12 * * * *"), Some("echo bye")).unwrap());
+        let s = get_by_name(&conn, "test-job").unwrap().unwrap();
+        assert_eq!(s.cron, "0 0 12 * * * *");
+        assert_eq!(s.command, "echo bye");
+    }
+
+    #[test]
+    fn test_update_cron_only_preserves_command_and_id() {
+        let conn = setup();
+        let id = add(&conn, "test-job", "0 0 9 * * * *", "echo hello").unwrap();
+
+        assert!(update(&conn, "test-job", Some("0 0 12 * * * *"), None).unwrap());
+        let s = get_by_name(&conn, "test-job").unwrap().unwrap();
+        assert_eq!(s.id, id); // id preserved (history stays attached)
+        assert_eq!(s.cron, "0 0 12 * * * *");
+        assert_eq!(s.command, "echo hello"); // unchanged
+    }
+
+    #[test]
+    fn test_update_command_only_preserves_cron() {
+        let conn = setup();
+        add(&conn, "test-job", "0 0 9 * * * *", "echo hello").unwrap();
+
+        assert!(update(&conn, "test-job", None, Some("echo bye")).unwrap());
+        let s = get_by_name(&conn, "test-job").unwrap().unwrap();
+        assert_eq!(s.cron, "0 0 9 * * * *"); // unchanged
+        assert_eq!(s.command, "echo bye");
+    }
+
+    #[test]
+    fn test_update_not_found() {
+        let conn = setup();
+        assert!(!update(&conn, "nope", Some("0 0 12 * * * *"), None).unwrap());
+    }
+
+    #[test]
+    fn test_update_nothing() {
+        let conn = setup();
+        add(&conn, "test-job", "0 0 9 * * * *", "echo hello").unwrap();
+        assert!(!update(&conn, "test-job", None, None).unwrap());
     }
 
     #[test]

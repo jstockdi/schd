@@ -46,6 +46,27 @@ pub fn cmd_add(conn: &Connection, name: &str, cron: &str, command: &str) -> Resu
     Ok(format!("added schedule '{name}' (id={id})"))
 }
 
+pub fn cmd_edit(
+    conn: &Connection,
+    name: &str,
+    cron: Option<&str>,
+    command: Option<&str>,
+) -> Result<String> {
+    if cron.is_none() && command.is_none() {
+        return Err(Error::Validation(
+            "nothing to update: provide --cron and/or --command".to_string(),
+        ));
+    }
+    if let Some(c) = cron {
+        schedule::validate_cron(c).map_err(Error::Validation)?;
+    }
+    if schedule::update(conn, name, cron, command)? {
+        Ok(format!("updated schedule '{name}'"))
+    } else {
+        Err(Error::NotFound(format!("schedule '{name}'")))
+    }
+}
+
 pub fn cmd_remove(conn: &Connection, name: &str) -> Result<String> {
     if schedule::remove(conn, name)? {
         Ok(format!("removed schedule '{name}'"))
@@ -281,6 +302,56 @@ mod tests {
         cmd_add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
         let err = cmd_add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap_err();
         assert!(matches!(err, Error::Db(_)));
+    }
+
+    #[test]
+    fn test_cmd_edit_success() {
+        let (_dir, conn) = setup();
+        cmd_add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
+        let result = cmd_edit(&conn, "job", Some("0 0 12 * * * *"), None).unwrap();
+        assert!(result.contains("updated schedule 'job'"));
+    }
+
+    #[test]
+    fn test_cmd_edit_invalid_cron() {
+        let (_dir, conn) = setup();
+        cmd_add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
+        let err = cmd_edit(&conn, "job", Some("bad"), None).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+    }
+
+    #[test]
+    fn test_cmd_edit_not_found() {
+        let (_dir, conn) = setup();
+        let err = cmd_edit(&conn, "nope", Some("0 0 12 * * * *"), None).unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)));
+    }
+
+    #[test]
+    fn test_cmd_edit_nothing_to_update() {
+        let (_dir, conn) = setup();
+        cmd_add(&conn, "job", "0 0 9 * * * *", "echo hi").unwrap();
+        let err = cmd_edit(&conn, "job", None, None).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+    }
+
+    #[test]
+    fn test_cmd_edit_preserves_run_history() {
+        let (_dir, conn) = setup();
+        cmd_add(&conn, "job", "0 * * * * * *", "echo hi").unwrap();
+        scheduler::tick(&conn).unwrap();
+        worker::tick(&conn, Duration::from_secs(10)).unwrap();
+
+        // A run exists before the edit.
+        let before = run::list_recent(&conn, Some("job"), 10).unwrap();
+        assert_eq!(before.len(), 1);
+
+        cmd_edit(&conn, "job", Some("0 0 12 * * * *"), None).unwrap();
+
+        // Editing in place keeps the run history (unlike remove + re-add).
+        let after = run::list_recent(&conn, Some("job"), 10).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].0.id, before[0].0.id);
     }
 
     #[test]
